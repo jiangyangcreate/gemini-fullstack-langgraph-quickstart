@@ -7,7 +7,7 @@ from langgraph.types import Send
 from langgraph.graph import StateGraph
 from langgraph.graph import START, END
 from langchain_core.runnables import RunnableConfig
-from google.genai import Client
+from langchain_openai import ChatOpenAI # from langchain_google_genai import ChatGoogleGenerativeAI
 
 from agent.state import (
     OverallState,
@@ -23,7 +23,7 @@ from agent.prompts import (
     reflection_instructions,
     answer_instructions,
 )
-from langchain_google_genai import ChatGoogleGenerativeAI
+
 from agent.utils import (
     get_citations,
     get_research_topic,
@@ -33,18 +33,17 @@ from agent.utils import (
 
 load_dotenv()
 
-if os.getenv("GEMINI_API_KEY") is None:
-    raise ValueError("GEMINI_API_KEY is not set")
+if os.getenv("DASHSCOPE_API_KEY") is None:
+    raise ValueError("DASHSCOPE_API_KEY is not set")
 
-# Used for Google Search API
-genai_client = Client(api_key=os.getenv("GEMINI_API_KEY"))
-
+# # Used for Google Search API
+# genai_client = Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 # Nodes
 def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerationState:
     """LangGraph node that generates search queries based on the User's question.
 
-    Uses Gemini 2.0 Flash to create an optimized search queries for web research based on
+    Uses Qwen Plus to create an optimized search queries for web research based on
     the User's question.
 
     Args:
@@ -61,11 +60,12 @@ def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerati
         state["initial_search_query_count"] = configurable.number_of_initial_queries
 
     # init Gemini 2.0 Flash
-    llm = ChatGoogleGenerativeAI(
+    llm = ChatOpenAI(
         model=configurable.query_generator_model,
         temperature=1.0,
         max_retries=2,
-        api_key=os.getenv("GEMINI_API_KEY"),
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api_key=os.getenv("DASHSCOPE_API_KEY"),
     )
     structured_llm = llm.with_structured_output(SearchQueryList)
 
@@ -77,7 +77,8 @@ def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerati
         number_queries=state["initial_search_query_count"],
     )
     # Generate the search queries
-    result = structured_llm.invoke(formatted_prompt)
+    result = structured_llm.invoke(formatted_prompt)  # ？？ 看下这里的输出是什么
+    # dir(对象) # 
     return {"search_query": result.query}
 
 
@@ -95,7 +96,7 @@ def continue_to_web_research(state: QueryGenerationState):
 def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
     """LangGraph node that performs web research using the native Google Search API tool.
 
-    Executes a web search using the native Google Search API tool in combination with Gemini 2.0 Flash.
+    Executes a web search using the native Google Search API tool in combination with Qwen Plus.
 
     Args:
         state: Current graph state containing the search query and research loop count
@@ -112,22 +113,24 @@ def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
     )
 
     # Uses the google genai client as the langchain client doesn't return grounding metadata
-    response = genai_client.models.generate_content(
+    llm = ChatOpenAI(
         model=configurable.query_generator_model,
-        contents=formatted_prompt,
-        config={
-            "tools": [{"google_search": {}}],
-            "temperature": 0,
-        },
+        temperature=0,
+        max_retries=2,
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api_key=os.getenv("DASHSCOPE_API_KEY"),
     )
+    response = llm.invoke(formatted_prompt)
     # resolve the urls to short urls for saving tokens and time
-    resolved_urls = resolve_urls(
-        response.candidates[0].grounding_metadata.grounding_chunks, state["id"]
-    )
-    # Gets the citations and adds them to the generated text
-    citations = get_citations(response, resolved_urls)
-    modified_text = insert_citation_markers(response.text, citations)
-    sources_gathered = [item for citation in citations for item in citation["segments"]]
+    # resolved_urls = resolve_urls(
+    #     response.candidates[0].grounding_metadata.grounding_chunks, state["id"]
+    # )
+    # # Gets the citations and adds them to the generated text
+    # citations = get_citations(response, resolved_urls)
+    # modified_text = insert_citation_markers(response.text, citations)
+    # sources_gathered = [item for citation in citations for item in citation["segments"]]
+    modified_text = response.content
+    sources_gathered = [] 
 
     return {
         "sources_gathered": sources_gathered,
@@ -163,11 +166,12 @@ def reflection(state: OverallState, config: RunnableConfig) -> ReflectionState:
         summaries="\n\n---\n\n".join(state["web_research_result"]),
     )
     # init Reasoning Model
-    llm = ChatGoogleGenerativeAI(
+    llm = ChatOpenAI(
+        api_key=os.getenv("DASHSCOPE_API_KEY"),
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         model=reasoning_model,
         temperature=1.0,
         max_retries=2,
-        api_key=os.getenv("GEMINI_API_KEY"),
     )
     result = llm.with_structured_output(Reflection).invoke(formatted_prompt)
 
@@ -242,11 +246,12 @@ def finalize_answer(state: OverallState, config: RunnableConfig):
     )
 
     # init Reasoning Model, default to Gemini 2.5 Flash
-    llm = ChatGoogleGenerativeAI(
+    llm = ChatOpenAI(
+        api_key=os.getenv("DASHSCOPE_API_KEY"),
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         model=reasoning_model,
         temperature=0,
         max_retries=2,
-        api_key=os.getenv("GEMINI_API_KEY"),
     )
     result = llm.invoke(formatted_prompt)
 
