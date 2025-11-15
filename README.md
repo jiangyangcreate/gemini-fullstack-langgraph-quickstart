@@ -1,21 +1,45 @@
+## 导出和导入 Docker Compose 项目
 
-**1. Build the Docker Image:**
+### 导出项目为 tar.gz
 
+在源机器上执行以下步骤：
 
-   ```bash
-   docker build -t gemini-fullstack-langgraph -f Dockerfile .
-   ```
-**2. Run the Production Server:**
+```bash
+docker build -t gemini-fullstack-langgraph -f Dockerfile .
+```
 
-   Windows
-   ```bash
-   $env:LANGSMITH_API_KEY="ls*****"; docker-compose up -d
-   ```
+```powershell
+# 保存镜像
+docker save gemini-fullstack-langgraph -o gemini-fullstack-langgraph.tar
+docker save docker.io/redis:6 -o redis-6.tar
+docker save docker.io/postgres:16 -o postgres-16.tar
+```
 
-   Linux
-   ```bash
-   LANGSMITH_API_KEY="ls*****"; docker-compose up -d
-   ```
+### 在目标机器上导入项目
 
-Open your browser and navigate to `http://localhost:8123/app/` to see the application. 
-The API will be available at `http://localhost:8123`.
+**1. 上传项目文件：**
+
+```bash
+docker-compose.yml 
+Dockerfile 
+Makefile
+*.tar // 所有的压缩文件
+```
+
+**2. 加载 Docker 镜像：**
+
+```bash
+docker load -i gemini-fullstack-langgraph.tar
+docker load -i redis-6.tar
+docker load -i postgres-16.tar
+```
+
+**4. 设置环境变量并启动服务：**
+
+Linux
+```bash
+LANGSMITH_API_KEY="lsv2****" docker-compose up -d
+```
+
+`http://localhost:8123/app/`
+API at `http://localhost:8123`.
